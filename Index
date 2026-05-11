@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+
+<html lang="de">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>MasjidQuiz</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Amiri:wght@400;700&display=swap" rel="stylesheet"/>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body,#root{height:100%;font-family:"Plus Jakarta Sans",sans-serif}
+body{background:#f2f2f7;-webkit-font-smoothing:antialiased}
+input,textarea,button{font-family:"Plus Jakarta Sans",sans-serif}
+input::placeholder,textarea::placeholder{color:rgba(60,60,67,.35)}
+input:focus,textarea:focus{outline:none}
+button{cursor:pointer}
+::-webkit-scrollbar{width:0}
+@keyframes pgF{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
+@keyframes pgB{from{opacity:0;transform:translateX(-24px)}to{opacity:1;transform:none}}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes pop{0%{opacity:0;transform:scale(.9)}65%{transform:scale(1.03)}100%{opacity:1;transform:scale(1)}}
+@keyframes flt{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+@keyframes bth{0%,100%{opacity:1}50%{opacity:.45}}
+@keyframes tst{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.pf{animation:pgF .3s cubic-bezier(.25,.46,.45,.94) both}
+.pb{animation:pgB .3s cubic-bezier(.25,.46,.45,.94) both}
+.ri{animation:rise .4s cubic-bezier(.25,.46,.45,.94) both}
+.po{animation:pop .4s cubic-bezier(.25,.46,.45,.94) both}
+.fl{animation:flt 3s ease-in-out infinite}
+.bt{animation:bth 2s ease-in-out infinite}
+.tp{animation:tst .3s cubic-bezier(.25,.46,.45,.94) both}
+.s1{animation-delay:.05s}.s2{animation-delay:.10s}.s3{animation-delay:.15s}
+.s4{animation-delay:.20s}.s5{animation-delay:.25s}
+.pr{transition:transform .12s,opacity .12s}
+.pr:hover{opacity:.86}
+.pr:active{transform:scale(.95);opacity:.75}
+.gb{transition:all .18s;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+.gb:hover{transform:translateY(-1px);filter:brightness(1.04)}
+.gb:active{transform:scale(.96)}
+.gc{backdrop-filter:blur(22px) saturate(180%);-webkit-backdrop-filter:blur(22px) saturate(180%)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ── Firebase SDK via CDN ── */
+const FB_CFG = {
+apiKey:“AIzaSyB124EHtiyG8HskTBxba16X19nmTGJEXLQ”,
+authDomain:“masjidquiz.firebaseapp.com”,
+projectId:“masjidquiz”,
+storageBucket:“masjidquiz.firebasestorage.app”,
+messagingSenderId:“725271430627”,
+appId:“1:725271430627:web:2f6aadb0033097368c4cd6”
+};
+
+/* Lazy-load Firebase */
+let _db = null;
+let _ref = null;
+async function getDB() {
+if (_db) return { db: _db, ref: _ref };
+const { initializeApp } = await import(“https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js”);
+const { getFirestore, doc, getDoc, setDoc, onSnapshot } = await import(“https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js”);
+const app = initializeApp(FB_CFG);
+_db = getFirestore(app);
+_ref = doc(_db, “app”, “data”);
+return { db: _db, ref: _ref, getDoc, setDoc, onSnapshot };
+}
+
+/* ── Helpers ── */
+const uid    = () => Math.random().toString(36).slice(2,9);
+const nowStr = () => new Date().toLocaleString(“de-DE”,{dateStyle:“short”,timeStyle:“short”});
+const today  = () => new Date().toLocaleDateString(“de-DE”);
+const qrUrl  = (t) => “https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=”+encodeURIComponent(t);
+const VALID  = [“a”,“b”,“c”,“d”];
+const IMAM   = “imam2024”;
+const APP_URL = window.location.href.split(”?”)[0];
+
+const EMPTY_Q = {id:null,questionCount:10,correctAnswers:[],status:“idle”,date:null,answers:{}};
+const DEFAULT = {
+users:[{id:“imam”,name:“Imam”,password:IMAM,role:“imam”,points:0,history:[]}],
+quiz:EMPTY_Q, announcements:[], sessions:[], currentSessionId:null
+};
+
+async function readDB() {
+try {
+const { ref, getDoc } = await getDB();
+const s = await getDoc(ref);
+return s.exists() ? s.data().state : DEFAULT;
+} catch(e) { console.error(“readDB”,e); return DEFAULT; }
+}
+async function writeDB(d) {
+try {
+const { ref, setDoc } = await getDB();
+await setDoc(ref, {state:d});
+} catch(e) { console.error(“writeDB”,e); }
+}
+
+/* ── Styles ── */
+const S = {
+app:   {background:“linear-gradient(145deg,#e8f0fe 0%,#f2f2f7 40%,#fef0fb 100%)”,minHeight:“100vh”,maxWidth:480,margin:“0 auto”,position:“relative”,overflow:“hidden”},
+b1:    {position:“fixed”,top:-120,right:-80,width:340,height:340,borderRadius:“50%”,background:“radial-gradient(circle,rgba(0,122,255,.18) 0%,transparent 70%)”,pointerEvents:“none”,zIndex:0},
+b2:    {position:“fixed”,bottom:60,left:-100,width:300,height:300,borderRadius:“50%”,background:“radial-gradient(circle,rgba(88,86,214,.14) 0%,transparent 70%)”,pointerEvents:“none”,zIndex:0},
+b3:    {position:“fixed”,top:“40%”,right:-60,width:200,height:200,borderRadius:“50%”,background:“radial-gradient(circle,rgba(255,55,95,.1) 0%,transparent 70%)”,pointerEvents:“none”,zIndex:0},
+pw:    {flex:1,display:“flex”,flexDirection:“column”,position:“relative”,zIndex:1},
+nav:   {position:“fixed”,bottom:0,left:“50%”,transform:“translateX(-50%)”,width:“100%”,maxWidth:480,display:“flex”,background:“rgba(242,242,247,.88)”,backdropFilter:“blur(30px)”,WebkitBackdropFilter:“blur(30px)”,borderTop:“1px solid rgba(255,255,255,.5)”,zIndex:100,boxShadow:“0 -1px 0 rgba(60,60,67,.12)”},
+nb:    {flex:1,display:“flex”,flexDirection:“column”,alignItems:“center”,padding:“10px 4px 8px”,background:“none”,border:“none”,position:“relative”,transition:“color .15s”},
+nd:    {position:“absolute”,top:0,left:“50%”,transform:“translateX(-50%)”,width:28,height:3,borderRadius:2,background:”#007AFF”},
+toast: {position:“fixed”,bottom:96,left:“50%”,transform:“translateX(-50%)”,backdropFilter:“blur(20px)”,WebkitBackdropFilter:“blur(20px)”,border:“1px solid”,borderRadius:24,padding:“11px 24px”,fontWeight:700,fontSize:14,zIndex:200,whiteSpace:“nowrap”,boxShadow:“0 8px 32px rgba(0,0,0,.12)”},
+sync:  {position:“fixed”,top:12,right:16,zIndex:300,background:“rgba(0,122,255,.15)”,border:“1px solid rgba(0,122,255,.3)”,borderRadius:20,padding:“5px 14px”,fontSize:12,fontWeight:700,color:”#007AFF”,backdropFilter:“blur(20px)”,WebkitBackdropFilter:“blur(20px)”},
+scr:   {display:“flex”,flexDirection:“column”,minHeight:“100vh”},
+scrc:  {display:“flex”,flexDirection:“column”,minHeight:“100vh”,justifyContent:“center”,alignItems:“center”},
+nbar:  {display:“flex”,justifyContent:“space-between”,alignItems:“center”,padding:“16px 20px 12px”,background:“rgba(242,242,247,.88)”,backdropFilter:“blur(20px)”,WebkitBackdropFilter:“blur(20px)”,borderBottom:“1px solid rgba(60,60,67,.1)”,position:“sticky”,top:0,zIndex:10},
+card:  {background:“rgba(255,255,255,.6)”,border:“1px solid rgba(255,255,255,.85)”,borderRadius:24,padding:“20px 20px”,boxShadow:“0 6px 28px rgba(0,0,0,.07)”},
+inp:   {width:“100%”,background:“rgba(118,118,128,.1)”,border:“1.5px solid rgba(60,60,67,.12)”,borderRadius:14,color:”#1c1c1e”,padding:“13px 16px”,fontSize:15,display:“block”,transition:“border-color .18s”},
+lbl:   {display:“block”,fontSize:13,fontWeight:600,color:“rgba(60,60,67,.55)”,marginBottom:7},
+pbtn:  {width:“100%”,background:”#007AFF”,border:“none”,borderRadius:16,color:”#fff”,padding:“15px 0”,fontWeight:800,fontSize:16,letterSpacing:”-.2px”,boxShadow:“0 4px 16px rgba(0,122,255,.4)”,cursor:“pointer”,transition:“all .18s”},
+gbtn:  {width:“100%”,background:“rgba(60,60,67,.07)”,border:“1px solid rgba(60,60,67,.12)”,borderRadius:16,color:“rgba(60,60,67,.7)”,padding:“13px 0”,fontWeight:700,fontSize:15,cursor:“pointer”,transition:“all .18s”},
+tbtn:  {width:“100%”,background:“none”,border:“none”,color:”#007AFF”,fontWeight:700,fontSize:15,cursor:“pointer”},
+epill: {background:“rgba(255,55,95,.1)”,border:“1px solid rgba(255,55,95,.3)”,borderRadius:14,padding:“11px 16px”,color:”#ff375f”,fontWeight:700,fontSize:14,marginBottom:10},
+bkbtn: {background:“rgba(0,122,255,.1)”,border:“none”,borderRadius:12,padding:“8px 14px”,fontWeight:700,color:”#007AFF”,fontSize:16,cursor:“pointer”},
+};
+
+/* ── Shared Components ── */
+function Blobs() {
+return <><div style={S.b1}/><div style={S.b2}/><div style={S.b3}/></>;
+}
+function NavBar({title, onBack, right}) {
+return (
+<div style={S.nbar}>
+<button className="pr" onClick={onBack} style={S.bkbtn}>←</button>
+<span style={{fontWeight:800,fontSize:16,color:”#1c1c1e”,letterSpacing:”-.3px”}}>{title}</span>
+<div style={{minWidth:44,display:“flex”,justifyContent:“flex-end”}}>{right||<span/>}</div>
+</div>
+);
+}
+function Field({label,value,set,ph,type=“text”,onEnter}) {
+return (
+<div style={{marginBottom:14}}>
+<label style={S.lbl}>{label}</label>
+<input
+type={type} value={value} placeholder={ph}
+onChange={e=>set(e.target.value)}
+onKeyDown={e=>e.key===“Enter”&&onEnter&&onEnter()}
+style={S.inp}
+onFocus={e=>{e.target.style.borderColor=”#007AFF”}}
+onBlur={e=>{e.target.style.borderColor=“rgba(60,60,67,.12)”}}
+/>
+</div>
+);
+}
+function PBtn({children,onClick,disabled,mt=0,color,flex}) {
+const bg = disabled ? “rgba(60,60,67,.1)” : (color||”#007AFF”);
+const sh = disabled ? “none” : (“0 4px 16px “+(color||”#007AFF”)+“44”);
+return (
+<button className=“pr gb” onClick={onClick} disabled={disabled}
+style={{…S.pbtn,background:bg,boxShadow:sh,color:disabled?“rgba(60,60,67,.3)”:”#fff”,marginTop:mt,cursor:disabled?“not-allowed”:“pointer”,…(flex?{flex:1,width:“auto”}:{})}}>
+{children}
+</button>
+);
+}
+function GBtn({children,onClick,mt=0,flex}) {
+return (
+<button className=“pr gb” onClick={onClick}
+style={{…S.gbtn,marginTop:mt,…(flex?{flex:1,width:“auto”}:{})}}>
+{children}
+</button>
+);
+}
+function MsgPage({icon,title,sub,onBack,doFloat}) {
+return (
+<div style={S.scrc}>
+<div className=“po” style={{textAlign:“center”,padding:32}}>
+<div className={doFloat?“fl”:””} style={{fontSize:64}}>{icon}</div>
+<p style={{fontWeight:800,fontSize:20,color:”#1c1c1e”,marginTop:16}}>{title}</p>
+<p style={{color:“rgba(60,60,67,.5)”,marginTop:8}}>{sub}</p>
+<button className="pr" onClick={onBack} style={{...S.tbtn,marginTop:28}}>← Zurück</button>
+</div>
+</div>
+);
+}
+
+/* ── App Root ── */
+function App() {
+const [data,   setData]   = useState(null);
+const [me,     setMe]     = useState(null);
+const [screen, setScreen] = useState(“login”);
+const [dir,    setDir]    = useState(“fwd”);
+const [toast,  setToast]  = useState(null);
+const [sync,   setSync]   = useState(false);
+const unsubRef = useRef(null);
+
+/* Check-in param */
+useEffect(()=>{
+const p = new URLSearchParams(window.location.search);
+if(p.get(“checkin”)===“1”) sessionStorage.setItem(“ci”,“1”);
+},[]);
+
+/* Firestore realtime */
+useEffect(()=>{
+let cancel = false;
+(async()=>{
+const initial = await readDB();
+if(!cancel) setData(initial);
+const { ref, onSnapshot } = await getDB();
+const unsub = onSnapshot(ref, snap=>{
+if(snap.exists()&&!cancel) setData(snap.data().state);
+});
+unsubRef.current = unsub;
+})();
+return ()=>{ cancel=true; if(unsubRef.current) unsubRef.current(); };
+},[]);
+
+/* Keep me fresh */
+useEffect(()=>{
+if(!me||!data) return;
+const f = data.users?.find(u=>u.id===me.id);
+if(f && JSON.stringify(f)!==JSON.stringify(me)) setMe(f);
+},[data]);
+
+const upd = useCallback(async(fn)=>{
+setSync(true);
+const cur = await readDB();
+const nxt = fn(cur);
+await writeDB(nxt);
+setSync(false);
+return nxt;
+},[]);
+
+const msg = (m,w=false)=>{ setToast({m,w}); setTimeout(()=>setToast(null),2600); };
+const go   = s=>{ setDir(“fwd”);  setScreen(s); };
+const back = s=>{ setDir(“back”); setScreen(s); };
+
+if(!data) return (
+<div style={{…S.scrc,background:“linear-gradient(145deg,#e8f0fe,#f2f2f7,#fef0fb)”,minHeight:“100vh”}}>
+<Blobs/>
+<div className=“po” style={{textAlign:“center”,position:“relative”,zIndex:1}}>
+<div className="fl" style={{fontSize:64,marginBottom:16}}>🕌</div>
+<p style={{fontWeight:800,fontSize:22,color:”#1c1c1e”}}>MasjidQuiz</p>
+<p style={{color:“rgba(60,60,67,.5)”,marginTop:8}}>Verbindet mit Server…</p>
+</div>
+</div>
+);
+
+const {users,quiz,announcements,sessions=[],currentSessionId} = data;
+const isImam = me?.role===“imam”;
+
+/* Checkin */
+const checkin = async(user)=>{
+await upd(p=>{
+const sess = […(p.sessions||[])];
+let sid = p.currentSessionId;
+let s = sess.find(x=>x.id===sid);
+if(!s||s.date!==today()){ sid=uid(); s={id:sid,date:today(),attendees:[]}; sess.push(s); }
+if(!s.attendees.find(a=>a.userId===user.id)) s.attendees.push({userId:user.id,name:user.name,time:nowStr()});
+return {…p,sessions:sess.map(x=>x.id===sid?s:x),currentSessionId:sid};
+});
+};
+
+/* Auth */
+const login = async(name,pw)=>{
+const f = await readDB();
+const u = f.users.find(u=>u.name.toLowerCase()===name.toLowerCase()&&u.password===pw);
+if(!u) return “Name oder Passwort falsch.”;
+setData(f); setMe(u);
+if(sessionStorage.getItem(“ci”)===“1”&&u.role===“youth”){ sessionStorage.removeItem(“ci”); await checkin(u); msg(“✓ Anwesenheit gespeichert!”); }
+go(“home”); return null;
+};
+const register = async(name,pw)=>{
+if(!name.trim()||!pw.trim()) return “Bitte alle Felder ausfüllen.”;
+const f = await readDB();
+if(f.users.find(u=>u.name.toLowerCase()===name.toLowerCase())) return “Name bereits vergeben.”;
+if(pw.length<4) return “Passwort min. 4 Zeichen.”;
+const u={id:uid(),name:name.trim(),password:pw,role:“youth”,points:0,history:[]};
+const nxt={…f,users:[…f.users,u]};
+await writeDB(nxt); setData(nxt); setMe(u);
+if(sessionStorage.getItem(“ci”)===“1”){ sessionStorage.removeItem(“ci”); await checkin(u); msg(“✓ Anwesenheit gespeichert!”); }
+go(“home”); return null;
+};
+const logout = ()=>{ setMe(null); setScreen(“login”); };
+
+/* Quiz */
+const setupQuiz = async(cnt,ans)=>{ await upd(p=>({…p,quiz:{id:uid(),questionCount:cnt,correctAnswers:ans,status:“idle”,date:today(),answers:{}}})); msg(“Quiz gespeichert ✓”); };
+const openQuiz  = async()=>{ await upd(p=>({…p,quiz:{…p.quiz,status:“open”}})); msg(“Quiz gestartet 🟢”); };
+const closeQuiz = async(force=false)=>{
+const cur = await readDB();
+const yth = cur.users.filter(u=>u.role===“youth”);
+const miss = yth.filter(u=>!cur.quiz.answers[u.id]).length;
+if(!force&&miss>0) return {warn:miss+” haben noch nicht geantwortet.”};
+await upd(p=>{
+if(p.quiz.status!==“open”) return p;
+const q=p.quiz;
+const uu=p.users.map(u=>{
+const ans=q.answers[u.id]; if(!ans) return u;
+const score=q.correctAnswers.reduce((a,c,i)=>a+((ans[i]||””).toLowerCase()===c.toLowerCase()?1:0),0);
+return {…u,points:u.points+score,history:[…(u.history||[]),{date:q.date,score,total:q.questionCount}]};
+});
+return {…p,users:uu,quiz:{…q,status:“closed”}};
+});
+msg(“Ausgewertet 🔒”); return null;
+};
+const reveal    = async()=>{ await upd(p=>({…p,quiz:{…p.quiz,status:“revealed”}})); msg(“Rangliste aufgedeckt 🏆”); };
+const resetQuiz = async()=>{ await upd(p=>({…p,quiz:EMPTY_Q})); msg(“Bereit 🔄”); };
+const submitAns = async(ans)=>{ if(isImam) return; await upd(p=>({…p,quiz:{…p.quiz,answers:{…p.quiz.answers,[me.id]:ans}}})); back(“home”); };
+
+/* Users */
+const delUser = async(id)=>{ await upd(p=>({…p,users:p.users.filter(u=>u.id!==id)})); msg(“Gelöscht”); };
+const resetPw = async(id,pw)=>{ await upd(p=>({…p,users:p.users.map(u=>u.id===id?{…u,password:pw}:u)})); msg(“Passwort geändert ✓”); };
+
+/* Announcements */
+const addAnn = async(a)=>{ await upd(p=>({…p,announcements:[a,…p.announcements]})); msg(“Veröffentlicht 📢”); };
+const delAnn = async(id)=>{ await upd(p=>({…p,announcements:p.announcements.filter(a=>a.id!==id)})); };
+const rsvp   = async(id)=>{ await upd(p=>({…p,announcements:p.announcements.map(a=>{ if(a.id!==id) return a; const att=a.attending||[]; return {…a,attending:att.includes(me.id)?att.filter(x=>x!==me.id):[…att,me.id]}; })})); };
+
+/* Derived */
+const youth  = users.filter(u=>u.role===“youth”);
+const scored = […youth].sort((a,b)=>b.points-a.points).map(u=>{ const ans=quiz.answers[u.id]; return {…u,quizScore:ans?quiz.correctAnswers.reduce((a,c,i)=>a+((ans[i]||””).toLowerCase()===c.toLowerCase()?1:0),0):null}; });
+const answered = !!quiz.answers[me?.id];
+const curSess  = sessions.find(s=>s.id===currentSessionId);
+const todayN   = curSess?.attendees?.length||0;
+const ciLink   = APP_URL+”?checkin=1”;
+
+const navItems = [
+{icon:“🏠”,label:“Home”,  s:“home”},
+{icon:“❓”,label:“Quiz”,  s:“quiz”},
+{icon:“🏆”,label:“Top”,   s:“rank”},
+{icon:“📢”,label:“News”,  s:“news”},
+…(isImam?[{icon:“⚙️”,label:“Admin”,s:“admin”}]:[]),
+];
+
+const screenMap = {
+login:      <LoginPage onLogin={login} onGoReg={()=>go(“register”)}/>,
+register:   <RegisterPage onRegister={register} onBack={()=>back(“login”)}/>,
+home:       me && <HomePage me={me} quiz={quiz} announcements={announcements} answered={answered} isImam={isImam} todayN={todayN} go={go} onLogout={logout}/>,
+quiz:       me && <QuizPage quiz={quiz} isImam={isImam} onSubmit={submitAns} onBack={()=>back(“home”)}/>,
+rank:       me && <RankPage quiz={quiz} scored={scored} me={me} isImam={isImam} onReveal={reveal} onBack={()=>back(“home”)}/>,
+news:       me && <NewsPage announcements={announcements} me={me} isImam={isImam} users={users} onAdd={addAnn} onDel={delAnn} onRsvp={rsvp} onBack={()=>back(“home”)}/>,
+attendance: me && <AttPage sessions={sessions} onBack={()=>back(“admin”)} ciLink={ciLink}/>,
+admin:      me&&isImam && <AdminPage quiz={quiz} youth={youth} scored={scored} todayN={todayN} onSetup={setupQuiz} onOpen={openQuiz} onClose={closeQuiz} onReveal={reveal} onReset={resetQuiz} onDelUser={delUser} onResetPw={resetPw} onBack={()=>back(“home”)} go={go}/>,
+};
+
+return (
+<div style={S.app}>
+<Blobs/>
+{sync && <div style={S.sync}>⟳ Sync…</div>}
+<div key={screen} className={dir===“back”?“pb”:“pf”} style={S.pw}>
+{screenMap[screen]||null}
+</div>
+{me && (
+<nav style={S.nav}>
+{navItems.map(({icon,label,s})=>(
+<button key={s} onClick={()=>go(s)} style={{…S.nb,color:screen===s?”#007AFF”:“rgba(60,60,67,.5)”}}>
+{screen===s && <span style={S.nd}/>}
+<span style={{fontSize:24,lineHeight:1}}>{icon}</span>
+<span style={{fontSize:10,marginTop:3,fontWeight:screen===s?700:500}}>{label}</span>
+</button>
+))}
+</nav>
+)}
+{toast && (
+<div className=“tp” style={{…S.toast,background:toast.w?“rgba(255,149,0,.15)”:“rgba(52,199,89,.15)”,borderColor:toast.w?“rgba(255,149,0,.4)”:“rgba(52,199,89,.4)”,color:toast.w?”#b45000”:”#1a6e33”}}>
+{toast.m}
+</div>
+)}
+</div>
+);
+}
+
+/* ── Login ── */
+function LoginPage({onLogin,onGoReg}) {
+const [name,setName]=useState(””); const [pw,setPw]=useState(””); const [err,setErr]=useState(””); const [ld,setLd]=useState(false);
+const isCI = sessionStorage.getItem(“ci”)===“1”;
+const sub = async()=>{ setLd(true); const e=await onLogin(name,pw); setLd(false); if(e) setErr(e); };
+return (
+<div style={{…S.scrc,padding:“24px 20px”,background:“linear-gradient(155deg,#e3f2fd 0%,#f1f8e9 55%,#fff8e1 100%)”}}>
+<div className=“ri” style={{width:“100%”,maxWidth:360}}>
+{isCI && (
+<div style={{background:“rgba(52,199,89,.12)”,border:“1px solid rgba(52,199,89,.35)”,borderRadius:18,padding:“14px 18px”,marginBottom:20,textAlign:“center”}}>
+<p style={{fontSize:20}}>👋</p>
+<p style={{fontWeight:800,color:”#1a6e33”,fontSize:15,marginTop:4}}>Anwesenheit bestätigen</p>
+<p style={{color:“rgba(60,60,67,.6)”,fontSize:13,marginTop:4}}>Einloggen um als anwesend gezählt zu werden.</p>
+</div>
+)}
+<div style={{textAlign:“center”,marginBottom:32}}>
+<div className=“fl” style={{fontSize:60,display:“block”,marginBottom:12}}>🕌</div>
+<h1 style={{fontSize:32,fontWeight:800,color:”#1c1c1e”,letterSpacing:-1.5}}>MasjidQuiz</h1>
+<p style={{fontFamily:“Amiri,serif”,color:“rgba(60,60,67,.55)”,fontSize:17,marginTop:6}}>العلم نور · Wissen ist Licht</p>
+</div>
+<div className="gc" style={S.card}>
+<Field label="Name"     value={name} set={setName} ph="Dein Name"/>
+<Field label="Passwort" value={pw}   set={setPw}   ph="••••••" type="password" onEnter={sub}/>
+{err && <div style={S.epill}>{err}</div>}
+<PBtn onClick={sub} disabled={ld} mt={16}>{ld?”…”:“Einloggen”}</PBtn>
+<button className="pr" onClick={onGoReg} style={{...S.tbtn,marginTop:14}}>Noch kein Konto? Registrieren →</button>
+</div>
+</div>
+</div>
+);
+}
+
+/* ── Register ── */
+function RegisterPage({onRegister,onBack}) {
+const [name,setName]=useState(””); const [pw,setPw]=useState(””); const [pw2,setPw2]=useState(””); const [err,setErr]=useState(””); const [ld,setLd]=useState(false);
+const isCI = sessionStorage.getItem(“ci”)===“1”;
+const sub = async()=>{ if(pw!==pw2){setErr(“Passwörter stimmen nicht überein.”);return;} setLd(true); const e=await onRegister(name,pw); setLd(false); if(e) setErr(e); };
+return (
+<div style={{…S.scrc,padding:“24px 20px”,background:“linear-gradient(155deg,#e3f2fd,#f1f8e9,#fff8e1)”}}>
+<div className=“ri” style={{width:“100%”,maxWidth:360}}>
+{isCI && (
+<div style={{background:“rgba(52,199,89,.12)”,border:“1px solid rgba(52,199,89,.35)”,borderRadius:18,padding:“14px 18px”,marginBottom:20,textAlign:“center”}}>
+<p style={{fontWeight:800,color:”#1a6e33”,fontSize:15}}>✨ Erstelle dein Konto</p>
+<p style={{color:“rgba(60,60,67,.6)”,fontSize:13,marginTop:4}}>Danach wirst du automatisch eingetragen.</p>
+</div>
+)}
+<div style={{textAlign:“center”,marginBottom:28}}>
+<div style={{fontSize:48}}>✨</div>
+<h1 style={{fontSize:26,fontWeight:800,color:”#1c1c1e”,marginTop:10,letterSpacing:-.8}}>Konto erstellen</h1>
+</div>
+<div className="gc" style={S.card}>
+<Field label="Dein Name"   value={name} set={setName} ph="z.B. Yusuf"/>
+<Field label="Passwort"    value={pw}   set={setPw}   ph="Min. 4 Zeichen" type="password"/>
+<Field label="Wiederholen" value={pw2}  set={setPw2}  ph="••••••" type="password" onEnter={sub}/>
+{err && <div style={S.epill}>{err}</div>}
+<PBtn onClick={sub} disabled={ld} mt={16}>{ld?”…”:“Konto erstellen”}</PBtn>
+<button className="pr" onClick={onBack} style={{...S.tbtn,marginTop:12}}>← Zurück</button>
+</div>
+</div>
+</div>
+);
+}
+
+/* ── Home ── */
+function HomePage({me,quiz,announcements,answered,isImam,todayN,go,onLogout}) {
+const ST={
+idle:    {e:“⏳”,t:“Kein Quiz aktiv”,       ti:“rgba(142,142,147,.12)”,d:”#8e8e93”},
+open:    {e:“🟢”,t:“Quiz läuft gerade!”,    ti:“rgba(52,199,89,.12)”,  d:”#34c759”},
+closed:  {e:“🔒”,t:“Wird ausgewertet…”,     ti:“rgba(255,159,10,.12)”, d:”#ff9f0a”},
+revealed:{e:“🏆”,t:“Ergebnisse sind live!”, ti:“rgba(255,55,95,.12)”,  d:”#ff375f”},
+}[quiz.status];
+const grid = [
+{icon:“🏆”,label:“Rangliste”,s:“rank”, ti:“rgba(255,214,10,.15)”,bo:“rgba(255,214,10,.35)”},
+{icon:“📢”,label:“News”,     s:“news”, ti:“rgba(52,199,89,.12)”, bo:“rgba(52,199,89,.3)”},
+…(isImam?[{icon:“⚙️”,label:“Admin”,s:“admin”,ti:“rgba(0,122,255,.1)”,bo:“rgba(0,122,255,.28)”}]:[]),
+];
+return (
+<div style={{...S.scr,paddingBottom:90}}>
+<div className=“ri” style={{padding:“52px 24px 24px”,display:“flex”,justifyContent:“space-between”,alignItems:“flex-start”}}>
+<div>
+<p style={{fontFamily:“Amiri,serif”,color:“rgba(60,60,67,.5)”,fontSize:15}}>السلام عليكم</p>
+<h2 style={{fontSize:28,fontWeight:800,color:”#1c1c1e”,letterSpacing:-.8,marginTop:2}}>{me.name} {isImam?“👑”:“🌙”}</h2>
+</div>
+<button className=“pr gb” onClick={onLogout} style={{background:“rgba(120,120,128,.12)”,border:“1px solid rgba(120,120,128,.2)”,borderRadius:22,padding:“8px 18px”,fontSize:13,fontWeight:600,color:“rgba(60,60,67,.75)”}}>Abmelden</button>
+</div>
+
+```
+  <div className="ri s1" style={{padding:"0 20px"}}>
+    <div className="gc" style={{background:ST.ti,border:"1px solid "+ST.d+"33",borderRadius:24,padding:"20px 22px",boxShadow:"0 8px 32px "+ST.d+"18"}}>
+      <div style={{display:"flex",alignItems:"center",gap:14}}>
+        <span className={quiz.status==="open"?"bt":""} style={{fontSize:32}}>{ST.e}</span>
+        <div style={{flex:1}}>
+          <p style={{fontWeight:700,fontSize:17,color:"#1c1c1e"}}>{ST.t}</p>
+          {quiz.date && <p style={{color:"rgba(60,60,67,.5)",fontSize:12,marginTop:3}}>{quiz.date} · {quiz.questionCount} Fragen</p>}
+        </div>
+        <div className={quiz.status==="open"?"bt":""} style={{width:10,height:10,borderRadius:"50%",background:ST.d,boxShadow:"0 0 10px "+ST.d}}/>
+      </div>
+      {quiz.status==="open"&&!answered&&!isImam && <PBtn onClick={()=>go("quiz")} mt={16}>Jetzt beantworten →</PBtn>}
+      {quiz.status==="open"&&answered&&!isImam  && <p style={{marginTop:14,color:"#34c759",fontWeight:700,fontSize:14}}>✓ Abgegeben · Warte auf den Imam</p>}
+      {quiz.status==="open"&&isImam             && <p style={{marginTop:12,color:"rgba(60,60,67,.5)",fontSize:13}}>Admin → Quiz beenden wenn alle fertig sind.</p>}
+      {quiz.status==="revealed"                 && <PBtn onClick={()=>go("rank")} mt={16} color="#ff375f">🏆 Rangliste ansehen</PBtn>}
+    </div>
+  </div>
+
+  <div className="ri s2" style={{display:"grid",gridTemplateColumns:isImam?"repeat(3,1fr)":"repeat(2,1fr)",gap:14,padding:"16px 20px 0"}}>
+    {grid.map(({icon,label,s,ti,bo})=>(
+      <button key={s} className="pr gb gc" onClick={()=>go(s)} style={{background:ti,border:"1px solid "+bo,borderRadius:22,padding:"18px 14px",textAlign:"left",boxShadow:"0 4px 16px rgba(0,0,0,.06)"}}>
+        <div style={{fontSize:30,marginBottom:8}}>{icon}</div>
+        <div style={{fontWeight:700,fontSize:15,color:"#1c1c1e"}}>{label}</div>
+      </button>
+    ))}
+  </div>
+
+  {isImam && (
+    <div className="ri s3" style={{padding:"14px 20px 0"}}>
+      <button className="pr gb gc" onClick={()=>go("attendance")} style={{width:"100%",background:"rgba(0,122,255,.08)",border:"1px solid rgba(0,122,255,.2)",borderRadius:22,padding:"16px 20px",textAlign:"left",display:"flex",alignItems:"center",gap:16}}>
+        <div style={{fontSize:32}}>📋</div>
+        <div style={{flex:1}}>
+          <p style={{fontWeight:800,fontSize:15,color:"#1c1c1e"}}>Anwesenheit heute</p>
+          <p style={{color:"rgba(60,60,67,.5)",fontSize:13,marginTop:2}}>QR-Code & Verlauf</p>
+        </div>
+        <div style={{background:"rgba(0,122,255,.15)",borderRadius:16,padding:"8px 16px",textAlign:"center"}}>
+          <p style={{fontWeight:900,fontSize:22,color:"#007AFF"}}>{todayN}</p>
+          <p style={{color:"rgba(60,60,67,.45)",fontSize:10,fontWeight:600}}>heute</p>
+        </div>
+      </button>
+    </div>
+  )}
+
+  {announcements[0] && (
+    <div className="ri s4" style={{padding:"14px 20px 0"}}>
+      <button className="pr gb gc" onClick={()=>go("news")} style={{width:"100%",background:"rgba(255,255,255,.55)",border:"1px solid rgba(255,255,255,.8)",borderRadius:22,padding:"18px 20px",textAlign:"left",boxShadow:"0 4px 20px rgba(0,0,0,.07)"}}>
+        <p style={{fontSize:11,fontWeight:700,color:"rgba(60,60,67,.4)",textTransform:"uppercase",letterSpacing:1.1,marginBottom:10}}>📢 Ankündigung</p>
+        <p style={{fontWeight:700,fontSize:16,color:"#1c1c1e"}}>{announcements[0].emoji} {announcements[0].title}</p>
+        {announcements[0].eventDate && <p style={{color:"#007AFF",fontSize:13,marginTop:6,fontWeight:600}}>📅 {new Date(announcements[0].eventDate).toLocaleDateString("de-DE")}{announcements[0].eventTime?" · "+announcements[0].eventTime+" Uhr":""}</p>}
+        <p style={{color:"#007AFF",fontSize:12,marginTop:10,fontWeight:700}}>Alle ansehen →</p>
+      </button>
+    </div>
+  )}
+</div>
+```
+
+);
+}
+
+/* ── Quiz ── */
+function QuizPage({quiz,isImam,onSubmit,onBack}) {
+const [answers,setAnswers]=useState(Array(quiz.questionCount).fill(null));
+const [step,setStep]=useState(0);
+const [submitted,setSubmitted]=useState(false);
+const [ld,setLd]=useState(false);
+
+if(isImam) return <MsgPage icon="👑" title="Du bist der Imam" sub="Der Imam nimmt nicht am Quiz teil." onBack={onBack}/>;
+if(quiz.status!==“open”) return <MsgPage icon="⏳" title="Kein Quiz aktiv" sub="Warte bis der Imam das Quiz startet." onBack={onBack} doFloat/>;
+if(submitted) return (
+<div style={S.scrc}>
+<div className=“po” style={{textAlign:“center”,padding:32}}>
+<div style={{fontSize:80,filter:“drop-shadow(0 8px 20px rgba(52,199,89,.4))”}}>🎉</div>
+<p style={{fontWeight:800,fontSize:24,color:”#1c1c1e”,marginTop:20}}>Abgegeben!</p>
+<p style={{color:“rgba(60,60,67,.5)”,marginTop:8,fontSize:15}}>Warte auf die Auswertung.</p>
+<PBtn onClick={onBack} mt={32}>← Zurück</PBtn>
+</div>
+</div>
+);
+
+const pick = l=>{ const a=[…answers]; a[step-1]=l; setAnswers(a); };
+const allDone = answers.every(Boolean);
+const OPTS=[
+{l:“a”,bg:“rgba(0,122,255,.1)”,  ac:”#007AFF”},
+{l:“b”,bg:“rgba(52,199,89,.1)”,  ac:”#34c759”},
+{l:“c”,bg:“rgba(255,159,10,.1)”, ac:”#ff9f0a”},
+{l:“d”,bg:“rgba(255,55,95,.1)”,  ac:”#ff375f”},
+];
+
+if(step===0) return (
+<div style={{...S.scr,paddingBottom:90}}>
+<NavBar title="Antwortbogen" onBack={onBack}/>
+<div style={{padding:“16px 20px”}}>
+<p style={{color:“rgba(60,60,67,.5)”,fontWeight:500,fontSize:14,marginBottom:18}}>Tippe auf eine Frage und wähle die Antwort des Imams.</p>
+<div style={{display:“grid”,gridTemplateColumns:“repeat(5,1fr)”,gap:10,marginBottom:24}}>
+{answers.map((a,i)=>(
+<button key={i} className={“pr gc ri s”+(i%5+1)} onClick={()=>setStep(i+1)} style={{border:“1.5px solid “+(a?“rgba(0,122,255,.4)”:“rgba(60,60,67,.12)”),background:a?“rgba(0,122,255,.1)”:“rgba(255,255,255,.5)”,borderRadius:16,padding:“10px 4px”,display:“flex”,flexDirection:“column”,alignItems:“center”}}>
+<span style={{color:“rgba(60,60,67,.35)”,fontSize:10,fontWeight:600}}>Fr.{i+1}</span>
+<span style={{color:a?”#007AFF”:“rgba(60,60,67,.2)”,fontSize:20,fontWeight:800,marginTop:4}}>{a?a.toUpperCase():”·”}</span>
+</button>
+))}
+</div>
+<PBtn disabled={!allDone||ld} onClick={async()=>{ setLd(true); setSubmitted(true); await onSubmit(answers); setLd(false); }}>
+{ld?“Wird gespeichert…”:allDone?“✓ Antworten abgeben”:“Noch “+answers.filter(x=>!x).length+” offen”}
+</PBtn>
+</div>
+</div>
+);
+
+const chosen=answers[step-1]; const pct=Math.round(step/quiz.questionCount*100);
+return (
+<div style={{...S.scr,paddingBottom:90}}>
+<NavBar title={“Frage “+step+” / “+quiz.questionCount} onBack={()=>setStep(0)} right={<span style={{color:”#007AFF”,fontWeight:700,fontSize:14}}>{pct}%</span>}/>
+<div style={{height:4,background:“rgba(60,60,67,.1)”,margin:“0 20px 20px”,borderRadius:2}}>
+<div style={{height:“100%”,borderRadius:2,background:“linear-gradient(90deg,#007AFF,#5ac8fa)”,width:pct+”%”,transition:“width .4s cubic-bezier(.25,.46,.45,.94)”}}/>
+</div>
+<div style={{padding:“0 20px”}}>
+<p style={{color:“rgba(60,60,67,.5)”,fontWeight:500,fontSize:14,marginBottom:20}}>Welche Antwort hat der Imam gegeben?</p>
+<div style={{display:“flex”,flexDirection:“column”,gap:12}}>
+{OPTS.map(({l,bg,ac},idx)=>{
+const sel=chosen===l;
+return (
+<button key={l} className={“pr gb gc ri s”+(idx+1)} onClick={()=>pick(l)}
+style={{display:“flex”,alignItems:“center”,gap:16,border:“1.5px solid “+(sel?ac+“88”:“rgba(60,60,67,.1)”),borderRadius:20,padding:“16px 18px”,background:sel?bg:“rgba(255,255,255,.5)”,boxShadow:sel?“0 6px 20px “+ac+“22”:“0 2px 8px rgba(0,0,0,.04)”}}>
+<span style={{width:40,height:40,borderRadius:12,background:sel?ac:“rgba(60,60,67,.08)”,color:sel?”#fff”:“rgba(60,60,67,.4)”,display:“flex”,alignItems:“center”,justifyContent:“center”,fontWeight:800,fontSize:18,flexShrink:0,transition:“all .18s”,boxShadow:sel?“0 4px 12px “+ac+“44”:“none”}}>{l.toUpperCase()}</span>
+<span style={{fontWeight:700,fontSize:17,color:sel?ac:”#1c1c1e”}}>Antwort {l.toUpperCase()}</span>
+{sel && <span style={{marginLeft:“auto”,color:ac,fontSize:22,fontWeight:900}}>✓</span>}
+</button>
+);
+})}
+</div>
+<div style={{display:“flex”,gap:12,marginTop:22}}>
+{step>1 && <GBtn onClick={()=>setStep(s=>s-1)} flex>←</GBtn>}
+{step<quiz.questionCount
+? <PBtn disabled={!chosen} onClick={()=>setStep(s=>s+1)} flex mt={0}>Weiter →</PBtn>
+: <PBtn onClick={()=>setStep(0)} flex mt={0}>Übersicht →</PBtn>}
+</div>
+</div>
+</div>
+);
+}
+
+/* ── Rank ── */
+function RankPage({quiz,scored,me,isImam,onReveal,onBack}) {
+const MEDALS=[“🥇”,“🥈”,“🥉”]; const GLOW=[“rgba(255,214,10,.3)”,“rgba(142,142,147,.3)”,“rgba(205,127,50,.3)”]; const vis=quiz.status===“revealed”;
+return (
+<div style={{...S.scr,paddingBottom:90}}>
+<NavBar title="🏆 Rangliste" onBack={onBack}/>
+{!vis?(
+<div style={{display:“flex”,flexDirection:“column”,alignItems:“center”,justifyContent:“center”,flex:1,padding:40,textAlign:“center”}}>
+<div className="fl" style={{fontSize:72}}>🔒</div>
+<p style={{fontWeight:800,fontSize:22,color:”#1c1c1e”,marginTop:24,letterSpacing:-.5}}>Noch gesperrt</p>
+<p style={{color:“rgba(60,60,67,.5)”,marginTop:10,fontSize:15}}>Der Imam deckt die Rangliste auf.</p>
+{isImam && <PBtn onClick={onReveal} mt={28} color="#ff375f">🏆 Jetzt aufdecken</PBtn>}
+</div>
+):(
+<div style={{padding:“12px 20px”}}>
+{scored.length===0?<p style={{color:“rgba(60,60,67,.5)”,textAlign:“center”,padding:40}}>Noch keine Jugendlichen.</p>:
+scored.map((u,i)=>{
+const isMe=u.id===me.id; const top3=i<3;
+return (
+<div key={u.id} className={“gc ri s”+Math.min(i+1,6)} style={{display:“flex”,alignItems:“center”,gap:14,background:isMe?“rgba(0,122,255,.1)”:“rgba(255,255,255,.55)”,border:“1.5px solid “+(isMe?“rgba(0,122,255,.35)”:top3?“rgba(255,255,255,.8)”:“rgba(60,60,67,.08)”),borderRadius:20,padding:“16px 18px”,marginBottom:10,boxShadow:top3?“0 6px 24px “+GLOW[i]:“0 2px 10px rgba(0,0,0,.05)”}}>
+<span style={{fontSize:top3?30:16,width:40,textAlign:“center”,fontWeight:800}}>{top3?MEDALS[i]:(i+1)+”.”}</span>
+<div style={{flex:1}}>
+<p style={{fontWeight:700,fontSize:15,color:”#1c1c1e”}}>{u.name}{isMe?” 👈”:””}</p>
+<p style={{color:“rgba(60,60,67,.45)”,fontSize:12,marginTop:2}}>{u.quizScore!==null?u.quizScore+”/”+quiz.questionCount+” richtig”:“Nicht teilgenommen”}</p>
+</div>
+<div style={{textAlign:“right”}}>
+<p style={{fontWeight:800,fontSize:22,color:isMe?”#007AFF”:”#1c1c1e”}}>{u.points}</p>
+<p style={{color:“rgba(60,60,67,.4)”,fontSize:11}}>Punkte</p>
+</div>
+</div>
+);
+})}
+</div>
+)}
+</div>
+);
+}
+
+/* ── News ── */
+function NewsPage({announcements,me,isImam,users,onAdd,onDel,onRsvp,onBack}) {
+const [open,setOpen]=useState(false); const [title,setTitle]=useState(””); const [body,setBody]=useState(””); const [eDate,setEDate]=useState(””); const [eTime,setETime]=useState(””); const [emoji,setEmoji]=useState(“📢”); const [ld,setLd]=useState(false);
+const EMOJIS=[“📢”,“📖”,“🌙”,“🤲”,“⭐”,“🕌”,“🎉”,“📅”,“🍽️”,“🏃”];
+const post=async()=>{ if(!title.trim()) return; setLd(true); await onAdd({id:uid(),title:title.trim(),body:body.trim(),eventDate:eDate,eventTime:eTime,emoji,date:today(),attending:[]}); setTitle(””);setBody(””);setEDate(””);setETime(””);setOpen(false);setLd(false); };
+const right = isImam&&<button className=“pr gb” onClick={()=>setOpen(o=>!o)} style={{background:open?“rgba(255,55,95,.12)”:“rgba(0,122,255,.1)”,border:“1px solid “+(open?“rgba(255,55,95,.3)”:“rgba(0,122,255,.25)”),borderRadius:20,padding:“7px 16px”,fontWeight:700,color:open?”#ff375f”:”#007AFF”,fontSize:14}}>{open?“✕”:”+ Neu”}</button>;
+return (
+<div style={{...S.scr,paddingBottom:90}}>
+<NavBar title="📢 Ankündigungen" onBack={onBack} right={right}/>
+{open&&isImam&&(
+<div className=“pf gc” style={{…S.card,margin:“12px 20px”}}>
+<p style={{fontSize:11,fontWeight:700,color:“rgba(60,60,67,.4)”,textTransform:“uppercase”,letterSpacing:1.1,marginBottom:14}}>Neue Ankündigung</p>
+<div style={{display:“flex”,gap:8,marginBottom:14,flexWrap:“wrap”}}>
+{EMOJIS.map(e=><button key={e} className=“pr” onClick={()=>setEmoji(e)} style={{fontSize:22,background:emoji===e?“rgba(0,122,255,.12)”:“transparent”,border:“1.5px solid “+(emoji===e?“rgba(0,122,255,.35)”:“transparent”),borderRadius:12,padding:“5px 7px”}}>{e}</button>)}
+</div>
+<Field label="Titel" value={title} set={setTitle} ph="z.B. Freitagsvortrag"/>
+<div style={{marginBottom:12}}>
+<label style={S.lbl}>Beschreibung</label>
+<textarea value={body} onChange={e=>setBody(e.target.value)} placeholder=“Details…” style={{…S.inp,height:70,resize:“none”}}/>
+</div>
+<div style={{display:“flex”,gap:10}}>
+<div style={{flex:1}}><Field label="Datum"   value={eDate} set={setEDate} type="date"/></div>
+<div style={{flex:1}}><Field label="Uhrzeit" value={eTime} set={setETime} type="time"/></div>
+</div>
+<PBtn onClick={post} disabled={ld} mt={8}>{ld?”…”:“Veröffentlichen”}</PBtn>
+</div>
+)}
+{announcements.length===0&&!open&&(
+<div style={{display:“flex”,flexDirection:“column”,alignItems:“center”,justifyContent:“center”,flex:1,padding:40}}>
+<div className="fl" style={{fontSize:52}}>📭</div>
+<p style={{color:“rgba(60,60,67,.45)”,marginTop:16,fontWeight:600}}>Noch keine Ankündigungen.</p>
+</div>
+)}
+<div style={{padding:“8px 20px”}}>
+{announcements.map((a,i)=>{
+const att=a.attending||[]; const iGo=att.includes(me.id); const names=att.map(id=>users.find(u=>u.id===id)?.name).filter(Boolean);
+return (
+<div key={a.id} className={“gc ri s”+Math.min(i+1,5)} style={{background:“rgba(255,255,255,.55)”,border:“1px solid rgba(255,255,255,.8)”,borderRadius:24,padding:20,marginBottom:14,boxShadow:“0 4px 20px rgba(0,0,0,.06)”}}>
+<div style={{display:“flex”,justifyContent:“space-between”,alignItems:“flex-start”}}>
+<span style={{fontSize:32}}>{a.emoji}</span>
+{isImam&&<button className=“pr” onClick={()=>onDel(a.id)} style={{background:“rgba(255,55,95,.1)”,border:“1px solid rgba(255,55,95,.25)”,borderRadius:16,padding:“5px 12px”,fontWeight:700,color:”#ff375f”,fontSize:13}}>Löschen</button>}
+</div>
+<p style={{fontWeight:800,fontSize:17,color:”#1c1c1e”,marginTop:12}}>{a.title}</p>
+{(a.eventDate||a.eventTime)&&<p style={{color:”#007AFF”,fontSize:13,marginTop:6,fontWeight:600}}>📅 {a.eventDate?new Date(a.eventDate).toLocaleDateString(“de-DE”):””}{a.eventTime?” · “+a.eventTime+” Uhr”:””}</p>}
+{a.body&&<p style={{color:“rgba(60,60,67,.65)”,fontSize:14,marginTop:10,lineHeight:1.65}}>{a.body}</p>}
+<div style={{display:“flex”,alignItems:“center”,gap:12,marginTop:16}}>
+<button className=“pr gb” onClick={()=>onRsvp(a.id)} style={{border:“1.5px solid “+(iGo?“rgba(52,199,89,.45)”:“rgba(60,60,67,.15)”),background:iGo?“rgba(52,199,89,.1)”:“rgba(60,60,67,.05)”,color:iGo?”#34c759”:“rgba(60,60,67,.55)”,borderRadius:20,padding:“8px 20px”,fontWeight:700,fontSize:14}}>{iGo?“✓ Ich komme”:“Ich komme”}</button>
+{names.length>0&&<span style={{color:“rgba(60,60,67,.4)”,fontSize:13}}>{names.length} kommen</span>}
+</div>
+{names.length>0&&<p style={{color:“rgba(60,60,67,.35)”,fontSize:12,marginTop:6}}>{names.join(”, “)}</p>}
+<p style={{color:“rgba(60,60,67,.25)”,fontSize:11,marginTop:12}}>{a.date}</p>
+</div>
+);
+})}
+</div>
+</div>
+);
+}
+
+/* ── Attendance ── */
+function AttPage({sessions,onBack,ciLink}) {
+const [tab,setTab]=useState(“qr”);
+const sorted=[…sessions].sort((a,b)=>b.date.localeCompare(a.date));
+return (
+<div style={{...S.scr,paddingBottom:90}}>
+<NavBar title="📋 Anwesenheit" onBack={onBack}/>
+<div style={{display:“flex”,margin:“14px 20px”,background:“rgba(118,118,128,.12)”,borderRadius:14,padding:3}}>
+{[[“qr”,“QR-Code”],[“history”,“Verlauf”]].map(([t,label])=>(
+<button key={t} className=“pr” onClick={()=>setTab(t)} style={{flex:1,padding:“9px 0”,background:tab===t?”#fff”:“transparent”,border:“none”,borderRadius:11,fontWeight:700,fontSize:14,color:tab===t?”#1c1c1e”:“rgba(60,60,67,.5)”,boxShadow:tab===t?“0 2px 10px rgba(0,0,0,.1)”:“none”,transition:“all .2s”}}>{label}</button>
+))}
+</div>
+{tab===“qr”&&(
+<div style={{padding:“0 20px”}}>
+<div className=“gc-card” style={{…S.card,textAlign:“center”,marginBottom:16}}>
+<p style={{fontSize:11,fontWeight:700,color:“rgba(60,60,67,.4)”,textTransform:“uppercase”,letterSpacing:1.2,marginBottom:16}}>QR-Code für heute</p>
+<div style={{display:“inline-block”,padding:12,background:”#fff”,borderRadius:20,boxShadow:“0 4px 20px rgba(0,0,0,.1)”}}>
+<img src={qrUrl(ciLink)} alt=“QR” width={200} height={200} style={{display:“block”,borderRadius:10}}/>
+</div>
+<p style={{color:“rgba(60,60,67,.55)”,fontSize:13,marginTop:16,lineHeight:1.6}}>In der Moschee aufhängen. Wer scannt wird automatisch eingetragen.</p>
+<div style={{marginTop:16,background:“rgba(0,122,255,.08)”,border:“1px solid rgba(0,122,255,.2)”,borderRadius:14,padding:“10px 16px”}}>
+<p style={{color:”#007AFF”,fontSize:12,fontWeight:600,wordBreak:“break-all”}}>{ciLink}</p>
+</div>
+</div>
+<div style={{background:“rgba(52,199,89,.08)”,border:“1px solid rgba(52,199,89,.25)”,borderRadius:18,padding:16}}>
+<p style={{fontWeight:700,color:”#1a6e33”,fontSize:14}}>💡 Tipp</p>
+<p style={{color:“rgba(60,60,67,.65)”,fontSize:13,marginTop:6,lineHeight:1.6}}>Screenshot vom QR-Code machen und ausdrucken – oder auf dem Handy zeigen.</p>
+</div>
+</div>
+)}
+{tab===“history”&&(
+<div style={{padding:“0 20px”}}>
+{sorted.length===0?(
+<div style={{textAlign:“center”,padding:40}}>
+<div className="fl" style={{fontSize:48}}>📭</div>
+<p style={{color:“rgba(60,60,67,.45)”,marginTop:12,fontWeight:600}}>Noch keine Anwesenheit.</p>
+</div>
+):sorted.map((s,i)=>(
+<div key={s.id} className={“gc ri s”+Math.min(i+1,5)} style={{background:“rgba(255,255,255,.55)”,border:“1px solid rgba(255,255,255,.8)”,borderRadius:22,padding:18,marginBottom:14,boxShadow:“0 4px 16px rgba(0,0,0,.06)”}}>
+<div style={{display:“flex”,justifyContent:“space-between”,alignItems:“center”,marginBottom:14}}>
+<div>
+<p style={{fontWeight:800,fontSize:16,color:”#1c1c1e”}}>📅 {s.date}</p>
+<p style={{color:“rgba(60,60,67,.45)”,fontSize:12,marginTop:2}}>Freitagssitzung</p>
+</div>
+<div style={{background:“rgba(0,122,255,.1)”,border:“1px solid rgba(0,122,255,.25)”,borderRadius:20,padding:“6px 16px”,textAlign:“center”}}>
+<p style={{fontWeight:800,fontSize:20,color:”#007AFF”}}>{s.attendees?.length||0}</p>
+<p style={{color:“rgba(60,60,67,.45)”,fontSize:10,fontWeight:600}}>anwesend</p>
+</div>
+</div>
+<div style={{display:“flex”,flexDirection:“column”,gap:8}}>
+{(s.attendees||[]).map((a,j)=>(
+<div key={j} style={{display:“flex”,alignItems:“center”,gap:10,background:“rgba(60,60,67,.04)”,borderRadius:12,padding:“8px 12px”}}>
+<div style={{width:32,height:32,borderRadius:10,background:“linear-gradient(135deg,rgba(0,122,255,.15),rgba(88,86,214,.15))”,display:“flex”,alignItems:“center”,justifyContent:“center”,fontWeight:800,fontSize:14,color:”#007AFF”}}>{a.name[0].toUpperCase()}</div>
+<p style={{flex:1,fontWeight:700,color:”#1c1c1e”,fontSize:14}}>{a.name}</p>
+<p style={{color:“rgba(60,60,67,.4)”,fontSize:12,fontWeight:600}}>{a.time}</p>
+</div>
+))}
+</div>
+</div>
+))}
+</div>
+)}
+</div>
+);
+}
+
+/* ── Admin ── */
+function AdminPage({quiz,youth,scored,todayN,onSetup,onOpen,onClose,onReveal,onReset,onDelUser,onResetPw,onBack,go}) {
+const [tab,setTab]=useState(“quiz”); const [cnt,setCnt]=useState(10); const [ans,setAns]=useState(Array(10).fill(””)); const [saved,setSaved]=useState(false); const [warn,setWarn]=useState(null); const [ld,setLd]=useState(false);
+useEffect(()=>{ if(!quiz.id){setCnt(10);setAns(Array(10).fill(””));setSaved(false);} },[quiz.id]);
+const updCnt=n=>{ const c=Math.max(1,Math.min(20,n)); setCnt(c); setAns(Array(c).fill(””)); setSaved(false); };
+const setA=(i,v)=>{ const val=v.toLowerCase().replace(/[^abcd]/g,””).slice(0,1); const a=[…ans]; a[i]=val; setAns(a); setSaved(false); };
+const allSet=ans.every(a=>VALID.includes(a));
+const handleSetup=async()=>{ setLd(true); await onSetup(cnt,[…ans]); setSaved(true); setLd(false); };
+const handleClose=async()=>{ setLd(true); const r=await onClose(false); setLd(false); if(r?.warn) setWarn(r.warn); };
+const [rt,setRt]=useState(null); const [npw,setNpw]=useState(””); const [pm,setPm]=useState(””);
+const doReset=async u=>{ if(npw.length<4){setPm(“Min. 4 Zeichen.”);return;} setLd(true); await onResetPw(u.id,npw); setPm(“✓ Geändert”); setNpw(””); setRt(null); setLd(false); };
+const part=youth.filter(u=>quiz.answers[u.id]);
+const TINT={idle:“rgba(142,142,147,.1)”,open:“rgba(52,199,89,.1)”,closed:“rgba(255,159,10,.1)”,revealed:“rgba(255,55,95,.1)”};
+const COL={idle:”#8e8e93”,open:”#34c759”,closed:”#ff9f0a”,revealed:”#ff375f”};
+const MSG={idle:quiz.id?“✓ Gespeichert · Bereit”:“Kein Quiz vorbereitet”,open:“🟢 Läuft · “+part.length+”/”+youth.length,closed:“🔒 Beendet & ausgewertet”,revealed:“🏆 Rangliste sichtbar”};
+
+return (
+<div style={{...S.scr,paddingBottom:90}}>
+<NavBar title="⚙️ Admin" onBack={onBack}/>
+
+```
+  <div style={{padding:"14px 20px 0"}}>
+    <button className="pr gb gc" onClick={()=>go("attendance")} style={{width:"100%",background:"rgba(0,122,255,.08)",border:"1px solid rgba(0,122,255,.2)",borderRadius:20,padding:"16px 18px",textAlign:"left",display:"flex",alignItems:"center",gap:14}}>
+      <div style={{fontSize:28}}>📋</div>
+      <div style={{flex:1}}>
+        <p style={{fontWeight:800,color:"#1c1c1e",fontSize:15}}>Anwesenheit & QR-Code</p>
+        <p style={{color:"rgba(60,60,67,.5)",fontSize:12,marginTop:2}}>{todayN>0?todayN+" heute anwesend":"Noch niemand eingescannt"}</p>
+      </div>
+      <span style={{color:"#007AFF",fontSize:20}}>→</span>
+    </button>
+  </div>
+
+  <div style={{display:"flex",margin:"14px 20px",background:"rgba(118,118,128,.12)",borderRadius:14,padding:3}}>
+    {["quiz","teilnehmer"].map(t=>(
+      <button key={t} className="pr" onClick={()=>setTab(t)} style={{flex:1,padding:"9px 0",background:tab===t?"#fff":"transparent",border:"none",borderRadius:11,fontWeight:700,fontSize:14,color:tab===t?"#1c1c1e":"rgba(60,60,67,.5)",boxShadow:tab===t?"0 2px 10px rgba(0,0,0,.1)":"none",transition:"all .2s"}}>{t==="quiz"?"📋 Quiz":"👥 Teilnehmer"}</button>
+    ))}
+  </div>
+
+  {tab==="quiz"&&(
+    <div>
+      {warn&&(
+        <div className="pf gc" style={{background:"rgba(255,159,10,.1)",border:"1.5px solid rgba(255,159,10,.35)",borderRadius:20,padding:18,margin:"0 20px 14px"}}>
+          <p style={{fontWeight:700,color:"#b45000",marginBottom:10}}>⚠️ {warn}</p>
+          <p style={{color:"rgba(60,60,67,.6)",fontSize:13,marginBottom:14}}>Fehlende Antworten zählen als falsch.</p>
+          <div style={{display:"flex",gap:10}}>
+            <button className="pr" onClick={async()=>{setWarn(null);setLd(true);await onClose(true);setLd(false);}} style={{flex:1,background:"#ff9f0a",border:"none",borderRadius:14,color:"#fff",padding:"12px 0",fontWeight:800}}>Trotzdem</button>
+            <button className="pr" onClick={()=>setWarn(null)} style={{flex:1,background:"rgba(60,60,67,.08)",border:"none",borderRadius:14,color:"#1c1c1e",padding:"12px 0",fontWeight:700}}>Abbrechen</button>
+          </div>
+        </div>
+      )}
+      <div className="gc" style={{background:TINT[quiz.status],border:"1px solid "+COL[quiz.status]+"33",borderRadius:22,padding:20,margin:"0 20px 14px"}}>
+        <p style={{fontSize:11,fontWeight:700,color:"rgba(60,60,67,.4)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Status</p>
+        <p style={{fontWeight:700,color:COL[quiz.status],fontSize:16,marginBottom:16}}>{MSG[quiz.status]}</p>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          {quiz.status==="idle"&&quiz.id     && <PBtn onClick={async()=>{setLd(true);await onOpen();setLd(false);}} color="#34c759" mt={0} flex disabled={ld}>▶ Starten</PBtn>}
+          {quiz.status==="open"              && <PBtn onClick={handleClose} color="#ff375f" mt={0} flex disabled={ld}>{ld?"…":"⏹ Beenden"}</PBtn>}
+          {quiz.status==="closed"            && <PBtn onClick={async()=>{setLd(true);await onReveal();setLd(false);}} mt={0} flex disabled={ld}>🏆 Aufdecken</PBtn>}
+          {(quiz.status==="closed"||quiz.status==="revealed") && <GBtn onClick={async()=>{setLd(true);await onReset();setLd(false);}} mt={0} flex>🔄 Neu</GBtn>}
+        </div>
+      </div>
+      {quiz.status==="idle"&&(
+        <div className="gc" style={{background:"rgba(255,255,255,.55)",border:"1px solid rgba(255,255,255,.8)",borderRadius:22,padding:20,margin:"0 20px"}}>
+          <p style={{fontSize:11,fontWeight:700,color:"rgba(60,60,67,.4)",textTransform:"uppercase",letterSpacing:1,marginBottom:16}}>Quiz vorbereiten</p>
+          <label style={S.lbl}>Anzahl Fragen</label>
+          <div style={{display:"flex",gap:16,alignItems:"center",marginBottom:22}}>
+            <button className="pr" onClick={()=>updCnt(cnt-1)} style={{width:44,height:44,borderRadius:14,background:"rgba(60,60,67,.08)",border:"none",fontWeight:900,fontSize:22,color:"#1c1c1e"}}>−</button>
+            <span style={{fontSize:32,fontWeight:800,color:"#007AFF",minWidth:44,textAlign:"center"}}>{cnt}</span>
+            <button className="pr" onClick={()=>updCnt(cnt+1)} style={{width:44,height:44,borderRadius:14,background:"rgba(60,60,67,.08)",border:"none",fontWeight:900,fontSize:22,color:"#1c1c1e"}}>+</button>
+          </div>
+          <label style={S.lbl}>Richtige Antworten</label>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:18}}>
+            {ans.map((a,i)=>(
+              <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+                <span style={{color:"rgba(60,60,67,.35)",fontSize:10,fontWeight:600,marginBottom:4}}>Fr.{i+1}</span>
+                <input maxLength={1} value={a.toUpperCase()} onChange={e=>setA(i,e.target.value)} placeholder="?"
+                  style={{width:"100%",background:VALID.includes(a)?"rgba(0,122,255,.1)":"rgba(60,60,67,.06)",border:"1.5px solid "+(VALID.includes(a)?"rgba(0,122,255,.4)":"rgba(60,60,67,.12)"),borderRadius:12,textAlign:"center",fontSize:18,fontWeight:800,padding:"9px 0",color:VALID.includes(a)?"#007AFF":"rgba(60,60,67,.3)",transition:"all .15s"}}/>
+              </div>
+            ))}
+          </div>
+          {saved&&<div className="ri" style={{background:"rgba(52,199,89,.1)",border:"1px solid rgba(52,199,89,.35)",borderRadius:14,padding:"11px 16px",color:"#1a6e33",fontWeight:700,fontSize:13,marginBottom:14}}>✓ Gespeichert · Drücke Starten wenn alle bereit sind</div>}
+          <PBtn disabled={!allSet||ld} onClick={handleSetup} mt={0}>{ld?"…":saved?"Erneut speichern":"Quiz speichern"}</PBtn>
+          {!allSet&&<p style={{color:"rgba(60,60,67,.4)",fontSize:12,textAlign:"center",marginTop:10}}>Noch {ans.filter(a=>!VALID.includes(a)).length} fehlen</p>}
+        </div>
+      )}
+    </div>
+  )}
+
+  {tab==="teilnehmer"&&(
+    <div style={{padding:"0 20px"}}>
+      <p style={{fontSize:13,color:"rgba(60,60,67,.45)",fontWeight:600,marginBottom:14}}>Jugendliche ({youth.length})</p>
+      {youth.length===0&&<p style={{color:"rgba(60,60,67,.4)",textAlign:"center",padding:40}}>Noch niemand registriert.</p>}
+      {scored.map((u,i)=>(
+        <div key={u.id} className={"ri s"+Math.min(i+1,5)} style={{marginBottom:10}}>
+          <div className="gc" style={{display:"flex",alignItems:"center",gap:12,background:"rgba(255,255,255,.55)",border:"1px solid rgba(255,255,255,.8)",borderRadius:20,padding:"14px 16px",boxShadow:"0 2px 10px rgba(0,0,0,.05)"}}>
+            <span style={{color:"rgba(60,60,67,.35)",width:22,fontWeight:700,fontSize:13}}>{i+1}.</span>
+            <div style={{flex:1}}>
+              <p style={{fontWeight:700,color:"#1c1c1e"}}>{u.name}</p>
+              <p style={{color:"rgba(60,60,67,.4)",fontSize:12}}>{quiz.answers[u.id]?"✓ Geantwortet":quiz.status==="open"?"⏳ Noch nicht":"–"}</p>
+            </div>
+            <p style={{color:"#007AFF",fontWeight:800,marginRight:8}}>{u.points} Pkt.</p>
+            <button className="pr" onClick={()=>{setRt(u);setNpw("");setPm("");}} style={{background:"rgba(0,122,255,.1)",border:"none",borderRadius:10,padding:"7px 10px",color:"#007AFF",fontWeight:700,fontSize:15}}>🔑</button>
+            <button className="pr" onClick={()=>{if(window.confirm(u.name+" löschen?")) onDelUser(u.id);}} style={{background:"rgba(255,55,95,.1)",border:"none",borderRadius:10,padding:"7px 10px",color:"#ff375f",fontWeight:700,fontSize:15}}>✕</button>
+          </div>
+          {rt?.id===u.id&&(
+            <div className="pf gc" style={{background:"rgba(0,122,255,.07)",border:"1.5px solid rgba(0,122,255,.25)",borderRadius:18,padding:16,marginTop:6}}>
+              <Field label={"Neues Passwort · "+u.name} value={npw} set={setNpw} type="password" ph="Min. 4 Zeichen"/>
+              {pm&&<p style={{color:"#34c759",fontWeight:700,fontSize:13,marginBottom:8}}>{pm}</p>}
+              <div style={{display:"flex",gap:10}}>
+                <PBtn onClick={()=>doReset(u)} mt={0} flex disabled={ld}>{ld?"…":"Speichern"}</PBtn>
+                <GBtn onClick={()=>setRt(null)} mt={0} flex>Abbrechen</GBtn>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+```
+
+);
+}
+
+ReactDOM.createRoot(document.getElementById(“root”)).render(<App/>);
+</script>
+
+</body>
+</html>
